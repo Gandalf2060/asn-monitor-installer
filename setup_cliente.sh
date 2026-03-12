@@ -36,10 +36,22 @@ read -p "   Usuário Docker Hub (ID): " DUSER
 read -s -p "   Personal Access Token: " DPASS
 echo -e "\n${BLUE}----------------------------------------------------------${NC}"
 
-# 3. INSTALAÇÃO DE DEPENDÊNCIAS
-echo -e "${BLUE}[*] Instalando dependências do sistema...${NC}"
+# 3. INSTALAÇÃO DE DEPENDÊNCIAS (MÉTODO OFICIAL DOCKER)
+echo -e "${BLUE}[*] Instalando Docker Engine e Compose V2...${NC}"
 apt update -qq
-apt install -y docker.io docker-compose certbot curl wget unzip gettext-base -qq
+apt install -y ca-certificates curl gnupg lsb-release gettext-base certbot unzip -qq
+
+# Adiciona a chave oficial do Docker
+mkdir -p /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
+
+# Configura o repositório estável
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+apt update -qq
+# Instala o Docker e o Plugin do Compose V2 (docker-compose-plugin)
+apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin -qq
+
 systemctl enable docker --now
 
 # 4. AUTENTICAÇÃO DOCKER HUB
@@ -106,10 +118,10 @@ chmod -R 777 data/
 [ -f "filebeat/filebeat.yml" ] && chown root:root filebeat/filebeat.yml && chmod 644 filebeat/filebeat.yml
 chown -R 472:472 grafana/ dashboards/ 2>/dev/null
 
-# 11. DEPLOY
+# 11. DEPLOY (Ajustado para o comando novo sem hífen)
 echo -e "${BLUE}[*] Iniciando containers...${NC}"
-docker-compose pull -q
-docker-compose up -d
+docker compose pull -q
+docker compose up -d
 
 # 12. FINALIZAÇÃO
 echo -e "${BLUE}[*] Aguardando Elasticsearch...${NC}"
