@@ -11,7 +11,7 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 # --- CONFIGURAÇÃO DO SEU MIRROR ---
-MIRROR_URL="http://IP_DO_SEU_SERVIDOR_MESTRE:8080/asn_monitor_PRO_v1.zip"
+MIRROR_URL="http://179.42.68.135:8080/asn_monitor_PRO_v1.zip"
 INSTALL_DIR="/opt/asn-monitor"
 
 clear
