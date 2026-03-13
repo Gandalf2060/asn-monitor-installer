@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-#   ASN MONITOR PRO - INSTALADOR v3.4 (REPAIR & CLEAN EDITION)
+#   ASN MONITOR PRO - INSTALADOR v3.5 (ULTIMATE STABILITY)
 # ==============================================================================
 
 GREEN='\033[0;32m'
@@ -9,21 +9,19 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-LOCAL_ZIP="/opt/asn-host/asn_monitor_PRO_v1.zip"
-DOWNLOAD_URL="http://127.0.0.1:8080/asn_monitor_PRO_v1.zip"
+# Substitua pelo IP real do seu servidor de arquivos
+DOWNLOAD_URL="http://IP_DO_SEU_SERVIDOR:8080/asn_monitor_PRO_v1.zip"
 
 clear
 echo -e "${BLUE}==========================================================${NC}"
 echo -e "${GREEN}          INSTALADOR AUTOMÁTICO ASN MONITOR PRO           ${NC}"
 echo -e "${BLUE}==========================================================${NC}"
 
-if [[ $EUID -ne 0 ]]; then
-   echo -e "${RED}[!] Erro: Execute como root.${NC}"
-   exit 1
-fi
+# 1. VALIDAÇÃO DE ROOT E AMBIENTE
+[[ $EUID -ne 0 ]] && { echo -e "${RED}[!] Erro: Execute como root.${NC}"; exit 1; }
 
-# 1. COLETA DE DADOS
-read -p "   Domínio de Acesso (ex: monitor.provedor.com.br): " DOMAIN
+# 2. COLETA DE DADOS
+read -p "   Domínio de Acesso: " DOMAIN
 read -p "   Número do ASN: " ASN
 read -p "   Bloco de IP: " SUBNET
 read -p "   Email para SSL: " EMAIL
@@ -32,78 +30,93 @@ read -p "   Usuário Docker Hub (ID): " DUSER
 read -s -p "   Personal Access Token: " DPASS
 echo -e ""
 
-# 2. INSTALAÇÃO DO DOCKER (MÉTODO OFICIAL - SEM ERRO DE DEPENDÊNCIA)
-echo -e "${BLUE}[*] Instalando Docker Engine e Compose V2...${NC}"
-apt-get remove docker docker-engine docker.io containerd runc -y 2>/dev/null
-apt-get update -qq
-apt-get install -y ca-certificates curl gnupg lsb-release gettext-base certbot unzip -qq
+# 3. LIMPEZA DE PORTAS E INSTALAÇÃO DE DEPENDÊNCIAS
+echo -e "${BLUE}[*] Preparando ambiente e limpando porta 80...${NC}"
+systemctl stop nginx 2>/dev/null
+systemctl disable nginx 2>/dev/null
+fuser -k 80/tcp 2>/dev/null
 
-mkdir -p /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-apt-get update -qq
-apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin -qq
+apt update -qq
+apt install -y docker.io docker-compose certbot curl wget unzip gettext-base -qq
 systemctl enable docker --now
 
-# 3. LOGIN DOCKER HUB
+# 4. LOGIN DOCKER HUB
 echo "$DPASS" | docker login -u "$DUSER" --password-stdin
 
-# 4. PREPARAÇÃO E LIMPEZA
-echo -e "${BLUE}[*] Limpando instalações anteriores...${NC}"
-# Remove pastas de configuração mas PRESERVA a pasta 'data' (se quiser manter bancos)
-# Se quiser apagar tudo, use: rm -rf /opt/asn-monitor
-mkdir -p /opt/asn-monitor
-
-# 5. EXTRAÇÃO
-if [ -f "$LOCAL_ZIP" ]; then
-    echo -e "${GREEN}[*] Usando arquivo local $LOCAL_ZIP${NC}"
-    cp "$LOCAL_ZIP" /tmp/asn_package.zip
-else
-    echo -e "${BLUE}[*] Baixando pacote via rede...${NC}"
-    wget -q "$DOWNLOAD_URL" -O /tmp/asn_package.zip
-fi
-
-echo -e "${BLUE}[*] Extraindo arquivos...${NC}"
-unzip -qo /tmp/asn_package.zip -d /tmp/asn_extract
-# Move os arquivos limpando o destino antes
-for dir in dashboards elastic_setup filebeat forensics grafana logstash nginx reputation; do
-    rm -rf /opt/asn-monitor/$dir
-    [ -d "/tmp/asn_extract/dist_package/$dir" ] && mv /tmp/asn_extract/dist_package/$dir /opt/asn-monitor/
-done
-cp /tmp/asn_extract/dist_package/docker-compose.yml /opt/asn-monitor/ 2>/dev/null
-rm -rf /tmp/asn_extract /tmp/asn_package.zip
-
-cd /opt/asn-monitor
-sed -i "s/seu-usuario/$DUSER/g" docker-compose.yml
+# 5. OTIMIZAÇÃO DE KERNEL (CRÍTICO PARA ELASTIC)
 sysctl -w vm.max_map_count=262144 > /dev/null
+echo "vm.max_map_count=262144" >> /etc/sysctl.conf
 
-# 6. SSL
-echo -e "${BLUE}[*] Configurando SSL...${NC}"
-systemctl stop nginx 2>/dev/null
+# 6. DOWNLOAD E EXTRAÇÃO (ROBUSTA)
+echo -e "${BLUE}[*] Baixando pacote do sistema...${NC}"
+wget -q --show-progress "$DOWNLOAD_URL" -O /tmp/asn_package.zip
+
+echo -e "${BLUE}[*] Extraindo e limpando diretórios antigos...${NC}"
+rm -rf /opt/asn-monitor
+mkdir -p /opt/asn-monitor
+unzip -qo /tmp/asn_package.zip -d /tmp/asn_extract
+
+# Move os arquivos para o local correto independente da estrutura do ZIP
+if [ -d "/tmp/asn_extract/dist_package" ]; then
+    cp -r /tmp/asn_extract/dist_package/* /opt/asn-monitor/
+else
+    cp -r /tmp/asn_extract/* /opt/asn-monitor/
+fi
+rm -rf /tmp/asn_extract /tmp/asn_package.zip
+cd /opt/asn-monitor
+
+# 7. AJUSTES DINÂMICOS NO DOCKER-COMPOSE (MEMÓRIA E USUÁRIO)
+# Ajustamos o Elastic para 2GB para o boot ser rápido e estável
+sed -i "s/seu-usuario/$DUSER/g" docker-compose.yml
+sed -i "s/-Xms4g -Xmx4g/-Xms2g -Xmx2g/g" docker-compose.yml
+
+# 8. CONFIGURAÇÃO .ENV
+cat <<EOF > .env
+TARGET_ASN=$ASN
+TARGET_SUBNET=$SUBNET
+CLIENT_DOMAIN=$DOMAIN
+INTERNAL_DNS=172.18.0.53
+ELASTIC_PASSWORD=9R=OOq0t-amCgsVVH=PV
+SECRET_KEY=$(openssl rand -hex 24)
+DEFAULT_PASS=Mudar@123
+EOF
+
+# 9. SSL
+echo -e "${BLUE}[*] Configurando Certificado SSL...${NC}"
 certbot certonly --standalone -d $DOMAIN --non-interactive --agree-tos -m $EMAIL --expand
 envsubst '${DOMAIN}' < nginx/default.conf.template > nginx/default.conf
 
-# 7. PERMISSÕES
+# 10. PERMISSÕES
 mkdir -p data/{sqlite,es_data}
 chmod -R 777 data/
 chown -R 472:472 grafana/ dashboards/ 2>/dev/null
 
-# 8. DEPLOY (COMANDO V2 - SEM HÍFEN)
-echo -e "${BLUE}[*] Subindo containers...${NC}"
-docker compose pull -q
-docker compose up -d
+# 11. DEPLOY
+echo -e "${BLUE}[*] Iniciando containers...${NC}"
+docker-compose pull -q
+docker-compose up -d
 
-# 9. FINALIZAÇÃO
-echo -e "${BLUE}[*] Aguardando Elasticsearch (60s)...${NC}"
-until curl -s -u elastic:9R=OOq0t-amCgsVVH=PV http://localhost:9200 > /dev/null; do
+# 12. HEALTHCHECK DO ELASTICSEARCH (REVISADO)
+echo -e "${BLUE}[*] Aguardando Elasticsearch responder... (Aprox. 60s)${NC}"
+for i in {1..30}; do
+    if curl -s -u elastic:9R=OOq0t-amCgsVVH=PV http://localhost:9200 > /dev/null; then
+        echo -e "${GREEN} OK!${NC}"
+        break
+    fi
     echo -ne "."
-    sleep 3
+    sleep 5
+    if [ $i -eq 30 ]; then
+        echo -e "${RED} Timeout! Verifique os logs com 'docker logs asn-elastic'${NC}"
+    fi
 done
 
+# 13. INICIALIZAÇÃO DO BANCO E POLÍTICAS
+echo -e "${BLUE}[*] Finalizando configurações internas...${NC}"
 docker exec -it asn-reputation python3 -c "import sys; sys.path.append('/app/reputation'); from core.database import init_db; init_db()"
+curl -s -u elastic:9R=OOq0t-amCgsVVH=PV -X PUT "http://localhost:9200/_ilm/policy/forensics_policy" -H 'Content-Type: application/json' --data-binary @elastic_setup/ilm_policies.json > /dev/null
+curl -s -u elastic:9R=OOq0t-amCgsVVH=PV -X PUT "http://localhost:9200/_index_template/forensics_template" -H 'Content-Type: application/json' --data-binary @index_templates.json > /dev/null
 
 echo -e "${GREEN}==========================================================${NC}"
-echo -e "${GREEN}   INSTALAÇÃO CONCLUÍDA!${NC}"
-echo -e "${BLUE}   URL: https://$DOMAIN${NC}"
+echo -e "${GREEN}   INSTALAÇÃO FINALIZADA COM SUCESSO!                     ${NC}"
+echo -e "${BLUE}   URL: https://$DOMAIN                                   ${NC}"
 echo -e "${GREEN}==========================================================${NC}"
